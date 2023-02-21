@@ -1,0 +1,41 @@
+[Preprocessing Raw Data]
+
+
+It processes the power of signals and finds both contact and release point of each touch.
+This contact and release point means start and end point of "faily stabilized" interval of each touch.
+We need this preprocssing to filter out meaningless data (i.e., hovering, noises) and deal with trustful data only.
+
+This script is far from working perfectly, we would probably need to change some values depending on our data type.
+Current values were set based on 1mm points and 9 lines (edge-edge).
+Especially for lines and patterns, this script is not the best idea (currently looking for a better way).
+
+
+Types of data we process are as below.
+
+1) points (purpose: to make a good calibration table to increase our perfermance)
+e.g.) python findContacts.py calbacalbase_tilt_se45.txt 10833
+
+For this data type (points), you need to set width and height if they are different than default values. (Current default: 69, 157)
+You can also use a few more options to crop out some lines at edge. Examples are as below.
+e.g.) python findContacts.py calbacalbase_tilt_se45.txt 10833 -t 2              --> crop out two lines from the top
+e.g.) python findContacts.py calbacalbase_tilt_se45.txt 10833 -b 1              --> crop out one line from the bottom
+e.g.) python findContacts.py calbacalbase_tilt_se45.txt 10833 -l 1              --> crop out one line from the left edge
+e.g.) python findContacts.py calbacalbase_tilt_se45.txt 10833 -r 1              --> crop out one line from the right edge
+e.g.) python findContacts.py calbacalbase_tilt_se45.txt 10833 -l 1 -r 1         --> crop out a line from both left and right edge (total two lines)
+
+
+
+2) lines, patterns (purpose: to test performance)
+You need to give an option, --notpoint or -np, meaning that its data type is not a point)
+e.g.) python findContacts.py eval_tilt_w45.txt 9 --notpoint
+
+The values currently set only work for detecting 9 lines from edge to edge, and even its result is not accurate.
+You can adjust some values in pointDetection method (rel_height, distance) to make it more accurate.
+    + rel_height: detected peak's relative height of width line which we will use
+      (As it gets closer to 1, closer to the bottom. As it gets closer to 0, closer to the peak.)
+    + distance: minimum distance to neighbouring peaks
+      (As it gets bigger, we want to detect less peaks.)
+
+  
+
+Date: Feb. 21, 2023
