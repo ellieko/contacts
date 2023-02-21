@@ -3,9 +3,9 @@
 
 It processes the power of signals and finds both contact and release point of each touch.
 This contact and release point means start and end point of "faily stabilized" interval of each touch.
-We need this preprocssing to filter out meaningless data (i.e., hovering, noises) and deal with trustful data only.
+We need this preprocssing to filter out meaningless data (i.e., hovering, noises) and deal with reliable data only.
 
-This script is far from working perfectly, we would probably need to change some values depending on our data type.
+This script is far from working perfectly, we need to change some values depending on our data type.
 Current values were set based on 1mm points and 9 lines (edge-edge).
 Especially for lines and patterns, this script is not the best idea (currently looking for a better way).
 
@@ -26,11 +26,11 @@ e.g.) python findContacts.py calbacalbase_tilt_se45.txt 10833 -l 1 -r 1         
 
 
 2) lines, patterns (purpose: to test performance)
-You need to give an option, --notpoint or -np, meaning that its data type is not a point)
+You need to give an option, --notpoint or -np, meaning that its data type is not a point.
 e.g.) python findContacts.py eval_tilt_w45.txt 9 --notpoint
 
-The values currently set only work for detecting 9 lines from edge to edge, and even its result is not accurate.
-You can adjust some values in pointDetection method (rel_height, distance) to make it more accurate.
+The current values in the script only work for detecting 9 lines from edge to edge, and even its result is not accurate.
+You can adjust some values in pointDetection method (rel_height, distance) to make it a bit more accurate.
     + rel_height: detected peak's relative height of width line which we will use
       (As it gets closer to 1, closer to the bottom. As it gets closer to 0, closer to the peak.)
     + distance: minimum distance to neighbouring peaks
@@ -39,3 +39,4 @@ You can adjust some values in pointDetection method (rel_height, distance) to ma
   
 
 Date: Feb. 21, 2023
+Ellie Ko

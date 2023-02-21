@@ -46,11 +46,14 @@ def updateTimestamp(d):
 # (ith touch, start_index, end_index, the number of dataframes within the touch interval)
 # marked missing points as (start_index, end_index) = (-1, -1)
 def savePointInfo(pointsInfo, output):
+    missing = 0 
     with open(output, 'w+') as f:
         for i in range(0, len(pointsInfo)):
             s, e = pointsInfo[i]
-            # missing = 'MISSING' if (s, e) == (-1, -1) else ''
+            if (s, e) == (-1, -1):
+                missing += 1
             f.write(f"{i} {s} {e} {e-s+1}\n")
+    return missing
 
 
 
@@ -627,17 +630,16 @@ if __name__ == '__main__':
         updated = updatePointsInfo(t, pointsInfo, width, height)
         pointsInfo = cropPoints(width, height, updated, n, top, bottom, left, right)
         print(f"--> Cropped out the data as you wished.")
-        print(f"--> You will have {len(pointsInfo)} points info, including missing points as (-1, -1), if any.")
+        print(f"--> You will have {len(pointsInfo)} points info, including any missing points in range.")
         print(f"--> Elapsed time: {round((time.time() - start_time)/60, 4)}")
 
+
     elif n != len(pointsInfo) and isPoint:
-        print(f"\n{n-len(pointsInfo)} points are missing.")
-        search = input(f"Press (y/Y) to find out the locations of missing.\n")
-        if search in ('y', 'Y'):
-            t = updateTimestamp(np.array(data))
-            updated = updatePointsInfo(t, pointsInfo, width, height)
-            pointsInfo = updated.reshape(width*height, 2)
-            print(f"--> Elapsed time: {round((time.time() - start_time)/60, 4)}")
+        print(f"\n\n{n-len(pointsInfo)} points are missing!!!")
+        t = updateTimestamp(np.array(data))
+        updated = updatePointsInfo(t, pointsInfo, width, height)
+        pointsInfo = updated.reshape(width*height, 2)
+        print(f"--> Elapsed time: {round((time.time() - start_time)/60, 4)}")
     
 
     # plt.plot(max_data)
@@ -649,8 +651,9 @@ if __name__ == '__main__':
     l = os.path.splitext(filename)
     output = f"{l[0]}_out.txt"
     print(f"\nSaving info into {output}...")
-    savePointInfo(pointsInfo, output)
-    print(f"--> Saved {len(pointsInfo)} contacts in total, including missing points as (-1, -1), if any.")
+    missing = savePointInfo(pointsInfo, output)
+    print(f"--> {missing} missing points were included, as a form of (-1, -1).")
+    print(f"--> Saved {len(pointsInfo)} contacts in total.")
     print(f"--> Elapsed time: {round((time.time() - start_time)/60, 4)}")
 
 
