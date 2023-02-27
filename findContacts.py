@@ -1,13 +1,12 @@
 from scipy.signal import find_peaks, peak_widths, peak_prominences
 import matplotlib.pyplot as plt
-import time, re, math, argparse, os
+import time, re, argparse, os
 import numpy as np
 from collections import deque
 
 
 # read data file
 def readFile(filename):
-
     data = []
     with open(filename, 'r') as f:
         for line in f.readlines():
@@ -37,7 +36,7 @@ def updateTimestamp(d):
     rollover_count = np.zeros(len(timestamp), dtype=int)
     rollover_count[1:] = np.cumsum(diff < 0)
 
-    # # Convert timestamps to time values
+    # Convert timestamps to time values
     t = timestamp + 65536 * rollover_count
 
     cracks = []
@@ -46,10 +45,9 @@ def updateTimestamp(d):
         new_diff = t[i] - t[i-1]
         if new_diff > 300:
             cracks.append((i-1, i))
-        # t = np.concatenate((t[:i], new), axis = None)
-
+            
     # print(f"The length of t = {len(t)}")
-    print(f"Cracks = {cracks}")
+    # print(f"cracks = {cracks}")
     return t, cracks
 
 
@@ -71,21 +69,27 @@ def savePointInfo(pointsInfo, output):
     return missing
 
 
+def onclick(event, contact_release_pairs, n):
+    global cid
+    if event.button == 1:
+        index = int(event.xdata)
+        contact_release_pairs.append(index)
+    if len(contact_release_pairs) == n*2:
+        plt.disconnect(cid)
+
 
 # detect contact and release points
 # returns np array of (start_index, end_index, peak_index, peak_width, peak_height)
-def pointDetection(max_data, n, isPoint) -> list:
+def pointDetection(max_data, n, isPoint, dist) -> list:
 
     # size for convolution (may need to change depending on the data type)
     # relative height of the width of each peak
     if isPoint:             # works for 1mm points
         size = 40               
-        rel_height = 0.2
-        dist = 80        
+        rel_height = 0.2     
     else:                   # works for lines (edge to edge)
         size = 200          # 200, 0.7
         rel_height = 0.7
-        dist = 200
 
     # convolve the data
     # may need to change window size depending on the data type (size below works for 1mm, 10833 points)
@@ -93,7 +97,7 @@ def pointDetection(max_data, n, isPoint) -> list:
     x = np.convolve(max_data, window, 'same')
 
     # find all peaks including noises (to use for 1st filter)
-    peaks0, _ = find_peaks(x, distance=80)
+    peaks0, _ = find_peaks(x, distance=dist)
     print(f"The number of all peaks including noises = {len(peaks0)}")
     pro = peak_prominences(x, peaks0)
 
@@ -101,39 +105,69 @@ def pointDetection(max_data, n, isPoint) -> list:
     peaks, _ = find_peaks(x, distance=dist, prominence=np.percentile(pro[0], 100*(1-n/len(peaks0))))
     print(f"The number of peaks after 1st filtering = {len(peaks)}")
 
-    # find the width of each peak (to use for 2nd filter)
-    wdt_results = peak_widths(x, peaks, rel_height=rel_height)
-
     # create pointsInfo, array of (start_inded, end_index, peak_index, peak_width, peak_height)
     pointsInfo = []
-    for i in range(len(wdt_results[0])):
-        peak_height = x[peaks[i]]
-        width_height = wdt_results[1][i]
-        start = math.ceil(wdt_results[2][i])
-        width = round(wdt_results[0][i])
 
-        # the issue of using prominence, it looks for n number of prominent points
-        # therefore when the data was missing some points, this filter is necessary
-        # filter out not-real points (where convolution size matters)
-        if peak_height - width_height < 1:
-            # print(f"Filtered... {i}, {peak_height} {width_height}")
-            # print(f"start = {start}, end = {start+width}")
-            continue
-        pointsInfo.append((start, start+width, peaks[i], width, height))
+    if isPoint:
+        # find the width of each peak (to use for 2nd filter)
     
-    print(f"The number of peaks after 2nd filtering = {len(pointsInfo)}")
+        wdt_results = peak_widths(x, peaks, rel_height=rel_height)
+        widths, heights, starts, _ = wdt_results
+
+        prev_good_height = None
+        for i in range(len(peaks)):
+            peak_height = x[peaks[i]]
+            # width_height = heights[i] #x[peaks[i]]
+            start = starts[i]
+
+            if i > 0 and i < len(peaks)-1:
+                left_neighbor_height = prev_good_height # x[int(peaks[i]-widths[i])]
+                right_neighbor_height = x[peaks[i+1]] # heights[i+1] # x[int(peaks[i]+widths[i])]
+
+                if (peak_height < 0.3 * left_neighbor_height) and (peak_height < 0.3 * right_neighbor_height):
+                    # print(f"Filtered... {i}, {left_neighbor_height}, {peak_height} {right_neighbor_height}")
+                    # print(f"start = {start}, end = {start+widths[i]}")
+                    # print(f"width = {widths[i]}")
+                    continue
+
+            prev_good_height = peak_height
+            pointsInfo.append((start, start+widths[i])) #peaks[i], width, height))
+        print(f"The number of peaks after 2nd filtering = {len(pointsInfo)}")
+
+    # if it's for lines (edge-edge)
+    else:
+
+        wdt_results = peak_widths(x, peaks, rel_height=rel_height)
+        plt.plot(max_data)
+        plt.plot(x)
+        plt.plot(peaks, x[peaks], "x")
+        plt.hlines(*wdt_results[1:], color="C2")
+        plt.show()
+        print(f"\nCurrent found intervals are shown in the graph.")
+        d_updated = input("Press (y/Y) if you want to find each contact and release by clicking on the graph.\n") in ('y', 'Y')
+    
+        if d_updated:
+            print(f"\nClick all contact and release points and close the graph window.")
+            global cid
+            contact_release_pairs = []
+            fig, ax = plt.subplots()
+            ax.plot(max_data)
+
+            cid = fig.canvas.mpl_connect('button_press_event', lambda event: onclick(event, contact_release_pairs, n))
+            plt.show()
+
+            for i in range(0, len(contact_release_pairs), 2):
+                pointsInfo.append((contact_release_pairs[i], contact_release_pairs[i+1]))
+            print(f"The number of touch you clicked = {len(pointsInfo)}")
+            
+        else:
+            widths, _, starts, _ = wdt_results
+            for i in range(len(peaks)):
+                pointsInfo.append((starts[i], starts[i]+widths[i]))
 
     pointsInfo = np.array(pointsInfo, dtype=int)
+    return pointsInfo
 
-    # plot the data with its detected (and filtered) peaks
-    # plt.plot(max_data)
-    # plt.plot(x)
-    # plt.plot(pointsInfo[:, 2], x[pointsInfo[:, 2]], "x")
-    # plt.hlines(*wdt_results[1:], color="C2")
-    # plt.show()
-
-    # return array of (start_index, end_index)
-    return pointsInfo[:, :2]
 
 
 
@@ -153,19 +187,22 @@ def validateRows(t, pointsInfo, width, height):
     # find a middle valid row
     start = (height//2)*width
     found, j = False, None
+    cnt = 0
     while not found:
 
         # change point?
         if temp[start] - temp[start+1] > 0.3 * temp[start]:
             # do they have valid points of width?
-            j = 1
-            while abs(temp[start+j] - temp[start+j+1]) < 0.3 * max(temp[start+j], temp[start+j+1]):
-                j += 1
-            if j == width-1:
-                found = True
+            maxV = temp[start]
+            # check if this entire row's max value is at index 0
+            for j in range(start+1, start+width):
+                if maxV < temp[j]:
+                    start = j
+                    break
+                if j == start+width-1:
+                    found = True
         else:
-            start = start + (j+1) if j else start + 1
-
+            start +=1
 
     middle_rows.append(pointsInfo[start:start+width].tolist())
 
@@ -204,7 +241,6 @@ def validateRows(t, pointsInfo, width, height):
     b_idx = -1
     for i in range(start+width, len(temp), width):
 
-
         if i + width < len(temp):    # if the row has width number of values to validate    
             maxV = temp[i]
             mean = maxV
@@ -214,7 +250,6 @@ def validateRows(t, pointsInfo, width, height):
                     b_idx = i
                     break
                 mean += temp[j]
-
             # check the max value's significance
             mean /= width
             if b_idx != -1 and maxV < mean*1.3:
@@ -225,7 +260,7 @@ def validateRows(t, pointsInfo, width, height):
             b_idx = i
 
         if b_idx != -1:
-            # print(f"{b_idx//width}th row: suspicious of missing points")
+            print(f"{b_idx//width}th row: suspicious of missing points")
             # print(temp[i:min(i+width, len(temp))])
             # print(pointsInfo[i:min(i+width, len(temp))])
             break
@@ -277,7 +312,7 @@ def summarizeRow2(ts_row, width):
 
 # checks where a given row doesn't have a point at an expected timestamp
 # from the end of the line (looking for a valid end point)
-def validateColumns_rvs(t, pointsInfo, k, saved_normal, next_start_ts, thrd):
+def validateColumns_rvs(t, pointsInfo, k, saved_normal, next_start_ts, thrd, total_missing):
     points_itv, btw_points_itv, moving_itv = saved_normal
     touch_itv = points_itv + btw_points_itv
     new_rows = []
@@ -337,6 +372,8 @@ def validateColumns_rvs(t, pointsInfo, k, saved_normal, next_start_ts, thrd):
                 valid_ts[pos] = (t[s], t[e]) 
 
             pos -= 1
+            if missing > total_missing:
+                raise Exception("The number of found missing is over total number of missing.")
         
         cnt += 1
 
@@ -355,16 +392,15 @@ def validateColumns_rvs(t, pointsInfo, k, saved_normal, next_start_ts, thrd):
 
 # checks where a given row doesn't have a point at an expected timestamp
 # from the beginning of the line (looking for a valid start point)
-def validateColumns(t, pointsInfo, k, saved_normal, prev_end_ts, thrd, missing, height):
+def validateColumns(t, pointsInfo, k, saved_normal, prev_end_ts, thrd, found_missing, height, total_missing):
     points_itv, btw_points_itv, moving_itv = saved_normal
     touch_itv = points_itv + btw_points_itv
     new_rows = []
 
     j = k
-    cnt = 0
+    cnt = missing = 0
 
-    while cnt < height - (k//width):
-
+    while j < len(pointsInfo):
         pointsInfo_idx = [(-1, -1) for _ in range(width)]
         valid_ts = [(-1, -1) for _ in range(width)]
 
@@ -376,11 +412,11 @@ def validateColumns(t, pointsInfo, k, saved_normal, prev_end_ts, thrd, missing, 
 
         # dealing with the beginning of each line(row)
         if abs(expected_start - t[s]) > thrd: #t[s] * 0.00005:
-            print(f"A point is missing at ({(j+missing)//width}, {pos})")
+            print(f"A point is missing at ({(j+found_missing)//width}, {pos})")
             print(f"[INFO] expected_start = {round(expected_start, 2)}, real_start = {t[s]}")
             prev_start = expected_start
             valid_ts[pos] = (expected_start, expected_start+points_itv)
-            cnt += 1
+            missing += 1
         else:
             prev_start = t[s]
             j += 1
@@ -398,11 +434,11 @@ def validateColumns(t, pointsInfo, k, saved_normal, prev_end_ts, thrd, missing, 
 
             # not valid
             if abs(expected_start - t[s]) > thrd:# t[s] * 0.00005:
-                print(f"A point is missing at ({(j+missing)//width}, {pos})")
+                print(f"A point is missing at ({(j+found_missing)//width}, {pos})")
                 print(f"[INFO] expected_start = {round(expected_start, 2)}, real_start = {t[s]}")
                 prev_start = expected_start
                 valid_ts[pos] = (expected_start, expected_start + points_itv)
-                cnt += 1
+                missing += 1
 
             # valid point, move forward
             else:
@@ -412,6 +448,9 @@ def validateColumns(t, pointsInfo, k, saved_normal, prev_end_ts, thrd, missing, 
                 valid_ts[pos] = (t[s], t[e])
 
             pos += 1
+
+            if missing > total_missing - found_missing:
+                raise Exception("The number of found missing is over total number of missing.")
 
         cnt += 1
         # print(pointsInfo_idx)
@@ -427,7 +466,7 @@ def validateColumns(t, pointsInfo, k, saved_normal, prev_end_ts, thrd, missing, 
 
 
 
-def updatePointsInfo(t, pointsInfo, width, height, crack):
+def updatePointsInfo(t, pointsInfo, width, height, crack, total_missing):
     print(f"\nFinding rows where points are missing...")
     t_idx, b_idx, middle_rows = validateRows(t, pointsInfo, width, height)
     if crack:
@@ -455,7 +494,7 @@ def updatePointsInfo(t, pointsInfo, width, height, crack):
         points, btw_points = summarizeRow(t, n1, width)
         saved_normal = (points, btw_points, moving)
 
-        top_rows, missing = validateColumns_rvs(t, pointsInfo, t_idx, saved_normal, next_start_ts, thrd_top)
+        top_rows, missing = validateColumns_rvs(t, pointsInfo, t_idx, saved_normal, next_start_ts, thrd_top, total_missing)
         middle_rows.extendleft(top_rows)
         # print(top_rows)
         # print(f"len(top_rows)={len(top_rows)}")
@@ -479,7 +518,7 @@ def updatePointsInfo(t, pointsInfo, width, height, crack):
         points, btw_points = summarizeRow(t, n1, width)
         saved_normal = (points, btw_points, moving)
 
-        bottom_rows = validateColumns(t, pointsInfo, b_idx, saved_normal, prev_end_ts, thrd_bottom, missing, height)
+        bottom_rows = validateColumns(t, pointsInfo, b_idx, saved_normal, prev_end_ts, thrd_bottom, missing, height, total_missing)
         middle_rows.extend(bottom_rows)
 
 
@@ -492,6 +531,9 @@ def updatePointsInfo(t, pointsInfo, width, height, crack):
 # crop width*height size of pointsInfo (missing points are shown as (-1, -1))
 # to get the data at center only
 def cropPoints(width, height, updated, n, top, bottom, left, right):
+    if updated.ndim == 2:
+        h, w = updated.shape
+        updated = updated.reshape(height, width, 2)
 
     h, w, _ = updated.shape
 
@@ -500,7 +542,7 @@ def cropPoints(width, height, updated, n, top, bottom, left, right):
     if w != width:
         raise Exception("The number of columns and your input width doesn't match.")
 
-    print(f"Original Shape: {updated.shape}")
+    # print(f"Original Shape: {updated.shape}")
     # print(updated[-3:, :, :])
     
     e1 = h if bottom == 0 else -bottom
@@ -509,80 +551,14 @@ def cropPoints(width, height, updated, n, top, bottom, left, right):
     pointsInfo = updated[top:e1, left:e2, :]
 
     nh, nw, _ = pointsInfo.shape
-    print(f"New Shape: {pointsInfo.shape}")
+    # print(f"New Shape: {pointsInfo.shape}")
     # print(pointsInfo[-3:, :, :])
 
     pointsInfo = pointsInfo.reshape(nh*nw, 2)
-    print(f"Updated Shape: {pointsInfo.shape}")
+    # print(f"Updated Shape: {pointsInfo.shape}")
     
     return pointsInfo
 
-
-
-# calculate center of mass of each row
-def comCoordinate(row, rx=True):
-    if rx:
-        start, end = 0, 36
-    else:
-        start, end = 37, 52
- 
-    # find local max
-    maxI, maxV = start, row[start]
-    for i in range(start+1, end+1):
-        if row[i] > maxV:
-            maxI, maxV = i, row[i]
-
-    # calculate COM
-    com = 100*(maxI-start)*maxV
-    deno = maxV
-    l, r = maxI-1, maxI+1
-    while (l >= start and row[l] >= 5) or (r <= end and row[r] >= 5):
-
-        if l >= start and row[l] >= 5:
-            com += (l-start)*100*row[l]
-            deno += row[l]
-            l -= 1
-        if r <= end and row[r] >= 5:
-            com += (r-start)*100*row[r]
-            deno += row[r]
-            r += 1
-    return round(com/deno, 3)
-
-
-
-# find coordinates of each contact&release
-# save coordinates info to filename_coor.txt
-def findCoordinates(d, pointsInfo, output):
-
-    rx_arr, tx_arr = [], []
-
-    with open(output, 'w+') as f:
-
-        # find the average of COM for each contact&release
-        # save information in a text file (tx, rx)
-        # rows: rx 37 (0-36), tx 16 (37-52)
-        print(f"The length of pointsInfo = {len(pointsInfo)}")
-        for i in range(len(pointsInfo)):
-            start, end = pointsInfo[i]
-
-            rows = d[start:end, 1:54]
-            p_rx, p_tx, n = 0, 0, end-start
-
-            for row in rows:
-                p_rx += comCoordinate(row)
-                p_tx += comCoordinate(row, False)
-            
-            rx, tx = round(p_rx/n), round(p_tx/n)
-            rx_arr.append(rx)
-            tx_arr.append(tx)
-
-            tx_c, rx_c = round(tx/100), round(rx/100)
-            f.write(f"{tx_c} {rx_c} {pointsInfo[i]}\n")
-
-    print(f"The length of rx_arr = {len(rx_arr)}")
-    print(f"The length of tx_arr = {len(tx_arr)}")
-
-    return rx_arr, tx_arr
 
 
 
@@ -600,8 +576,9 @@ if __name__ == '__main__':
     # params for points (required if it's different than default, especially when you want to crop the data)
     parser.add_argument('--width', type=int, default=69, help='the number of total contacts(releases) in a given row')
     parser.add_argument('--height', type=int, default=157, help='the number of total contacts(releases) in a given column')
+    parser.add_argument('--dist', type=int, default=80, help='the required minimal horizontal distance between neighbouring peaks')
 
-    parser.add_argument('--thrd_top', '-tt',  type=int, default=10, help='the difference to allow between expected point and real point at top')
+    parser.add_argument('--thrd_top', '-tt',  type=int, default=20, help='the difference to allow between expected point and real point at top')
     parser.add_argument('--thrd_bottom', '-tb',  type=int, default=30, help='the difference to allow between expected point and real point at bottom')
 
     parser.add_argument('--left', '-l', type=int, default=0, help='the number of lines not to consider from the left edge')
@@ -614,6 +591,10 @@ if __name__ == '__main__':
     filename = args.filename
     n, isPoint = args.contacts, args.notpoint
     width, height = args.width, args.height
+    if isPoint:
+        dist = args.dist
+    else:
+        dist = 200
     thrd_top, thrd_bottom = args.thrd_top, args.thrd_bottom
     left, right, top, bottom = args.left, args.right, args.top, args.bottom
 
@@ -627,7 +608,7 @@ if __name__ == '__main__':
 
 
     print(f"\nFinding peaks...")
-    pointsInfo = pointDetection(max_data, n=n, isPoint=isPoint)
+    pointsInfo = pointDetection(max_data, n=n, isPoint=isPoint, dist=dist)
     print(f"--> Detected {len(pointsInfo)} peaks.")
     print(f"--> Elapsed time: {round((time.time() - start_time)/60, 4)}")
 
@@ -635,11 +616,15 @@ if __name__ == '__main__':
     l = os.path.splitext(filename)
     output = f"{l[0]}_out.txt"
 
-    if isPoint and n != len(pointsInfo):
-        print(f"\n{n-len(pointsInfo)} points are missing!!!")     
+    total_missing = 0
+    if n != len(pointsInfo):
+        print(f"\n{n-len(pointsInfo)} points are missing!!!")    
+        total_missing = n - len(pointsInfo)
+    if not isPoint:
+        savePointInfo(pointsInfo, output)
 
     # validating the found points
-    if isPoint:
+    else:
         print(f"\nValidating the found points...")
         t, cracks = updateTimestamp(np.array(data))
         
@@ -648,28 +633,36 @@ if __name__ == '__main__':
         if len(cracks) != 0:
 
             # not updating pointsInfo but checks if it is suspicious
-            t_idx, b_idx, _ = updatePointsInfo(t, pointsInfo, width, height, True)
-            savePointInfo(pointsInfo, output)
+            t_idx, b_idx, _ = updatePointsInfo(t, pointsInfo, width, height, True, total_missing)
             if t_idx != -1 or b_idx != -1:
-                print(f"Manual searching is recommended with info below.")
-                print(f"--> Huge timestamp changes are in the indices below.")
+                savePointInfo(pointsInfo, output)
+                print(f"\nManual searching is recommended with info below.")
+                print(f"--> Huge timestamp changes happened in the below intervals.")
                 print(cracks)
                 if t_idx != -1:
-                    print(f"--> Check from index 0 to {t_idx+width-1} index.")
+                    print(f"--> Check from the beginning to {t_idx+width-1} index.")
                 if b_idx != -1:
-                    print(f"--> Check from {b_idx+width-1} index to index {len(pointsInfo)-1}.")
+                    print(f"--> Check from {b_idx} index to the end.")
+
+            elif top != 0 or bottom != 0 or left != 0 or right != 0:
+                print("\nCropping output...")
+                pointsInfo = cropPoints(width, height, pointsInfo, n, top, bottom, left, right)
+                print(f"--> Cropped out the data as you wished.")
+                savePointInfo(pointsInfo, output)
 
         
         else:
-            t_idx, b_idx, updated = updatePointsInfo(t, pointsInfo, width, height, False)
+            t_idx, b_idx, updated = updatePointsInfo(t, pointsInfo, width, height, False, total_missing)
 
             if top != 0 or bottom != 0 or left != 0 or right != 0:
                 print("\nCropping output...")
                 pointsInfo = cropPoints(width, height, updated, n, top, bottom, left, right)
                 print(f"--> Cropped out the data as you wished.")
 
-            print(f"--> Elapsed time: {round((time.time() - start_time)/60, 4)}")
-            pointsInfo = updated.reshape(width*height, 2)
+            else:
+                print(f"--> Elapsed time: {round((time.time() - start_time)/60, 4)}")
+                pointsInfo = updated.reshape(width*height, 2)
+            
             savePointInfo(pointsInfo, output)
 
 
@@ -679,21 +672,4 @@ if __name__ == '__main__':
 
     # plt.plot(max_data)
     # plt.plot(pointsInfo, max_data[pointsInfo], "x")
-    # plt.show()
-
-
-    # # Find coordinates and save info
-    # print(f"\nFinding coordinates...")
-    # output = f"{l[0]}_coor.txt"
-    # rx_arr, tx_arr = findCoordinates(d, pointsInfo, output)
-    # print(f"--> Calculated {len(pointsInfo)} coordinates in total.")
-    # print(f"--> Elapsed time: {round((time.time() - start_time)/60, 4)}")
-
-    # plot the data with its detected (and filtered) peaks
-    # plt.plot(max_data)
-    # plt.plot(pointsInfo, max_data[pointsInfo], "x")
-    # plt.show()
-
-    # # plot the calculated contact&releases
-    # plt.scatter(rx_arr, tx_arr, s=1)
     # plt.show()
